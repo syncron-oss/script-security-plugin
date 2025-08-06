@@ -217,6 +217,7 @@ public final class SecureGroovyScript extends AbstractDescribableImpl<SecureGroo
     // TODO copied with modifications from CpsFlowExecution; need to find a way to share commonalities
 
     private static void cleanUpGlobalClassValue(@NonNull ClassLoader loader) throws Exception {
+        long startTime = System.nanoTime();
         Class<?> classInfoC = Class.forName("org.codehaus.groovy.reflection.ClassInfo");
         // TODO switch to MethodHandle for speed
         Field globalClassValueF = classInfoC.getDeclaredField("globalClassValue");
@@ -250,20 +251,37 @@ public final class SecureGroovyScript extends AbstractDescribableImpl<SecureGroo
                 toRemove.add((Class) klazzF.get(value));
             }
         }
-        Iterator<Class<?>> it = toRemove.iterator();
-        while (it.hasNext()) {
-            Class<?> klazz = it.next();
+        boolean isLogLevelFinestLoggable = LOGGER.isLoggable(Level.FINEST);
+        if (isLogLevelFinestLoggable) {
+            LOGGER.log(Level.FINE, "The log level FINEST is loggable, cleanUpGlobalClassValue will be slow, toRemove.size()={0}", toRemove.size());
+        }
+        List<Class<?>> toRemoveReally = new ArrayList<>();
+        for (Class<?> klazz : toRemove) {
             ClassLoader encounteredLoader = klazz.getClassLoader();
             if (encounteredLoader != loader) {
-                it.remove();
-                if (LOGGER.isLoggable(Level.FINEST)) {
-                  LOGGER.log(Level.FINEST, "ignoring {0} with loader {1}", new Object[] {klazz, /* do not hold from LogRecord */String.valueOf(encounteredLoader)});
+                if (isLogLevelFinestLoggable) {
+                    LOGGER.log(Level.FINEST, "ignoring {0} with loader {1}", new Object[]{klazz, /* do not hold from LogRecord */String.valueOf(encounteredLoader)});
                 }
+            } else {
+                toRemoveReally.add(klazz);
             }
         }
-        LOGGER.log(Level.FINE, "cleaning up {0} associated with {1}", new Object[] {toRemove.toString(), loader.toString()});
-        for (Class<?> klazz : toRemove) {
+        LOGGER.log(Level.FINE, "cleaning up {0} associated with {1}", new Object[] {toRemoveReally.toString(), loader.toString()});
+        for (Class<?> klazz : toRemoveReally) {
             removeM.invoke(map, klazz);
+        }
+        double elapsed_secs = (double)(System.nanoTime() - startTime) / 1_000_000_000.0;
+        if (elapsed_secs > 1.0) {
+            LOGGER.log(
+                Level.WARNING,
+                "cleanUpGlobalClassValue took {0}s toRemove.size()={1} toRemoveReally.size()={2} isLogLevelFinestLoggable={3}",
+                new Object[] {
+                    String.format("%.2g%n", elapsed_secs),
+                    toRemove.size(),
+                    toRemoveReally.size(),
+                    isLogLevelFinestLoggable
+                }
+            );
         }
     }
 
